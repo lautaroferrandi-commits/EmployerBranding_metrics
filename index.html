@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
-  <title>EB Metrics Dashboard</title>
+  <title>Video Metrics Dashboard</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
   <!-- DM Sans -->
@@ -197,6 +197,7 @@
       grid-template-columns: repeat(5, minmax(0, 1fr));
       gap: 8px;
     }
+
     .chip {
       background: #f9fafb;
       border: 1px solid var(--border);
@@ -207,6 +208,19 @@
     }
     .chip .label { color: var(--muted); font-weight: 800; text-transform: uppercase; letter-spacing: .03em; }
     .chip .value { font-weight: 900; margin-top: 2px; }
+
+    .platform-chips { display:flex; gap:6px; flex-wrap:wrap; }
+    .platform-pill {
+      display:inline-flex;
+      align-items:center;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,53,94,0.22);
+      background: rgba(255,53,94,0.06);
+      color: var(--chipText);
+      font-size: 12px;
+      font-weight: 900;
+    }
 
     table {
       width: 100%;
@@ -284,7 +298,7 @@
       border: 1px solid var(--border);
       border-radius: 12px;
       padding: 20px;
-      max-width: 720px;
+      max-width: 860px;
       box-shadow: var(--shadow);
     }
 
@@ -301,7 +315,7 @@
       letter-spacing: .04em;
     }
 
-    input {
+    input, select {
       width: 100%;
       padding: 10px 10px;
       border: 1px solid var(--border);
@@ -310,7 +324,7 @@
       outline: none;
       background: white;
     }
-    input:focus { box-shadow: 0 0 0 4px var(--focus); border-color: var(--primary); }
+    input:focus, select:focus { box-shadow: 0 0 0 4px var(--focus); border-color: var(--primary); }
 
     .checkbox {
       display: flex;
@@ -320,7 +334,7 @@
     }
     .checkbox input { width: auto; }
 
-    .form-actions { display: flex; gap: 10px; margin-top: 10px; }
+    .form-actions { display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
 
     .hint {
       font-size: 12px;
@@ -329,11 +343,56 @@
       font-weight: 700;
     }
 
+    .platform-block {
+      margin-top: 14px;
+      border-top: 1px solid var(--border);
+      padding-top: 14px;
+    }
+
+    .platform-head {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+
+    .platform-head h3 {
+      margin: 0;
+      font-size: 13px;
+      font-weight: 900;
+    }
+
+    .platform-row {
+      border: 1px dashed var(--border);
+      border-radius: 12px;
+      padding: 12px;
+      margin-bottom: 10px;
+      background: #fff;
+    }
+
+    .platform-row .row {
+      display:grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 10px;
+    }
+
+    .platform-row .row.two {
+      grid-template-columns: 1fr 1fr;
+    }
+
+    .platform-row .row.one {
+      grid-template-columns: 1fr;
+    }
+
+    .platform-row .row + .row { margin-top: 10px; }
+
     @media (max-width: 900px) {
       .grid-2 { grid-template-columns: 1fr; }
       th, td { white-space: normal; }
       .rank-breakdown { grid-template-columns: 1fr 1fr; }
       .form-row { grid-template-columns: 1fr; }
+      .platform-row .row { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -402,6 +461,7 @@
           <th>Video</th>
           <th>Channel</th>
           <th>Date</th>
+          <th>Platforms</th>
           <th>Views</th>
           <th>Likes</th>
           <th>Comments</th>
@@ -429,7 +489,7 @@
       <div class="form-row">
         <div>
           <label for="channel">Channel</label>
-          <input id="channel" placeholder="Ej: TikTok / IG / YouTube" />
+          <input id="channel" placeholder="Ej: Factorial ES" />
         </div>
         <div>
           <label for="date">Date</label>
@@ -451,26 +511,13 @@
         </div>
       </div>
 
-      <div class="form-row">
-        <div>
-          <label for="views">Views</label>
-          <input type="number" id="views" placeholder="0" min="0" step="1" />
+      <div class="platform-block">
+        <div class="platform-head">
+          <h3>Platforms</h3>
+          <button class="btn" id="addPlatformBtn" type="button">+ Add platform</button>
         </div>
-        <div>
-          <label for="likes">Likes</label>
-          <input type="number" id="likes" placeholder="0" min="0" step="1" />
-        </div>
-      </div>
-
-      <div class="form-row">
-        <div>
-          <label for="comments">Comments</label>
-          <input type="number" id="comments" placeholder="0" min="0" step="1" />
-        </div>
-        <div>
-          <label for="reposts">Reposts</label>
-          <input type="number" id="reposts" placeholder="0" min="0" step="1" />
-        </div>
+        <div id="platformRows"></div>
+        <div class="hint">Tip: Add one row per platform (Instagram, LinkedIn, YouTube, TikTok, Oktopost). Totals are aggregated across all platforms.</div>
       </div>
 
       <div class="form-actions">
@@ -499,6 +546,8 @@
     conversions: 'Conversions'
   };
 
+  const PLATFORMS = ['Instagram', 'LinkedIn', 'YouTube', 'TikTok', 'Oktopost'];
+
   // Pesos del score compuesto (suman 1)
   const SCORE_WEIGHTS = {
     views: 0.40,
@@ -519,7 +568,6 @@
 
   function formatDateISO(iso) {
     if (!iso) return '—';
-    // Evita shift por timezone
     const d = new Date(iso + 'T00:00:00');
     return new Intl.DateTimeFormat('es-ES', { year:'numeric', month:'2-digit', day:'2-digit' }).format(d);
   }
@@ -528,10 +576,59 @@
     return videos.reduce((a, v) => a + (Number(v[key]) || 0), 0);
   }
 
-  function maxima(videos) {
+  function escapeHtml(str) {
+    return String(str ?? '')
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#039;');
+  }
+
+  // -----------------------------
+  // Aggregation helpers (multi-platform)
+  // -----------------------------
+  function ensurePlatforms(video) {
+    // Backward compat: if video has legacy top-level metrics, wrap into one platform.
+    if (Array.isArray(video.platforms)) return video;
+
+    const legacy = {
+      platform: 'YouTube',
+      views: Number(video.views) || 0,
+      likes: Number(video.likes) || 0,
+      comments: Number(video.comments) || 0,
+      reposts: Number(video.reposts) || 0
+    };
+
+    return {
+      id: video.id || uid(),
+      title: video.title || '',
+      channel: video.channel || '',
+      date: video.date || '',
+      hasUtm: !!video.hasUtm,
+      conversions: Number(video.conversions) || 0,
+      platforms: [legacy]
+    };
+  }
+
+  function aggregateVideo(video) {
+    const v = ensurePlatforms(video);
+    const totals = { views: 0, likes: 0, comments: 0, reposts: 0, conversions: v.hasUtm ? (Number(v.conversions) || 0) : 0 };
+    for (const p of (v.platforms || [])) {
+      totals.views += Number(p.views) || 0;
+      totals.likes += Number(p.likes) || 0;
+      totals.comments += Number(p.comments) || 0;
+      totals.reposts += Number(p.reposts) || 0;
+    }
+    return totals;
+  }
+
+  function maximaAgg(videos) {
     const max = { views: 0, likes: 0, comments: 0, reposts: 0, conversions: 0 };
-    for (const v of videos) {
-      for (const m of METRICS) max[m] = Math.max(max[m], Number(v[m]) || 0);
+    for (const raw of videos) {
+      const v = ensurePlatforms(raw);
+      const a = aggregateVideo(v);
+      for (const m of METRICS) max[m] = Math.max(max[m], Number(a[m]) || 0);
     }
     return max;
   }
@@ -543,10 +640,10 @@
   }
 
   // Score compuesto normalizado
-  function computeScore(video, max) {
+  function computeScoreAgg(agg, max) {
     let score = 0;
     for (const m of METRICS) {
-      score += norm(video[m] || 0, max[m]) * SCORE_WEIGHTS[m];
+      score += norm(agg[m] || 0, max[m]) * SCORE_WEIGHTS[m];
     }
     return score; // 0..1
   }
@@ -591,10 +688,8 @@
     hasUtm: document.getElementById('hasUtm'),
     conversionsRow: document.getElementById('conversionsRow'),
     conversions: document.getElementById('conversions'),
-    views: document.getElementById('views'),
-    likes: document.getElementById('likes'),
-    comments: document.getElementById('comments'),
-    reposts: document.getElementById('reposts'),
+    platformRows: document.getElementById('platformRows'),
+    addPlatformBtn: document.getElementById('addPlatformBtn'),
     saveBtn: document.getElementById('saveBtn'),
     cancelEditBtn: document.getElementById('cancelEditBtn')
   };
@@ -612,7 +707,9 @@
       const raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return;
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) state.videos = parsed;
+      if (Array.isArray(parsed)) {
+        state.videos = parsed.map(ensurePlatforms);
+      }
     } catch (e) {
       console.warn('No se pudo leer localStorage:', e);
     }
@@ -638,6 +735,87 @@
   }
 
   // -----------------------------
+  // Platform rows (form)
+  // -----------------------------
+  function platformRowTemplate(data = {}) {
+    const rowId = 'p_' + Math.random().toString(16).slice(2);
+    const platform = data.platform || 'Instagram';
+    const views = Number.isFinite(Number(data.views)) ? Number(data.views) : 0;
+    const likes = Number.isFinite(Number(data.likes)) ? Number(data.likes) : 0;
+    const comments = Number.isFinite(Number(data.comments)) ? Number(data.comments) : 0;
+    const reposts = Number.isFinite(Number(data.reposts)) ? Number(data.reposts) : 0;
+
+    return `
+      <div class="platform-row" data-row="${rowId}">
+        <div class="row">
+          <div>
+            <label>Platform</label>
+            <select class="p-platform">
+              ${PLATFORMS.map(p => `<option value="${p}" ${p===platform?'selected':''}>${p}</option>`).join('')}
+            </select>
+          </div>
+          <div>
+            <label>Views</label>
+            <input class="p-views" type="number" min="0" step="1" value="${views}" />
+          </div>
+          <div>
+            <label>Likes</label>
+            <input class="p-likes" type="number" min="0" step="1" value="${likes}" />
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label>Comments</label>
+            <input class="p-comments" type="number" min="0" step="1" value="${comments}" />
+          </div>
+          <div>
+            <label>Reposts</label>
+            <input class="p-reposts" type="number" min="0" step="1" value="${reposts}" />
+          </div>
+          <div style="display:flex; align-items:flex-end; justify-content:flex-end;">
+            <button class="btn btn-danger" type="button" data-remove="${rowId}">Remove</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function addPlatformRow(data) {
+    el.platformRows.insertAdjacentHTML('beforeend', platformRowTemplate(data));
+    const removeBtn = el.platformRows.querySelector(`[data-remove="${el.platformRows.lastElementChild?.dataset?.row}"]`);
+    // Bind remove safely (also for older rows)
+    bindPlatformRemoveButtons();
+  }
+
+  function bindPlatformRemoveButtons() {
+    el.platformRows.querySelectorAll('[data-remove]').forEach(btn => {
+      if (btn.dataset.bound === '1') return;
+      btn.dataset.bound = '1';
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.remove;
+        const row = el.platformRows.querySelector(`[data-row="${id}"]`);
+        if (row) row.remove();
+        // Ensure at least one row
+        if (el.platformRows.children.length === 0) addPlatformRow();
+      });
+    });
+  }
+
+  function readPlatformsFromForm() {
+    const rows = Array.from(el.platformRows.querySelectorAll('.platform-row'));
+    const platforms = rows.map(r => ({
+      platform: r.querySelector('.p-platform')?.value || 'Instagram',
+      views: clampNonNeg(r.querySelector('.p-views')?.value),
+      likes: clampNonNeg(r.querySelector('.p-likes')?.value),
+      comments: clampNonNeg(r.querySelector('.p-comments')?.value),
+      reposts: clampNonNeg(r.querySelector('.p-reposts')?.value),
+    }));
+
+    // Remove empty duplicates? (Optional) Keep as-is.
+    return platforms.length ? platforms : [{ platform: 'Instagram', views: 0, likes: 0, comments: 0, reposts: 0 }];
+  }
+
+  // -----------------------------
   // Form logic
   // -----------------------------
   function toggleUtmUI() {
@@ -653,6 +831,10 @@
     el.conversionsRow.style.display = 'none';
     el.saveBtn.textContent = 'Save';
     el.cancelEditBtn.style.display = 'none';
+
+    // Reset platform rows
+    el.platformRows.innerHTML = '';
+    addPlatformRow({ platform: 'Instagram' });
   }
 
   function startEdit(id) {
@@ -664,14 +846,15 @@
     el.title.value = v.title || '';
     el.channel.value = v.channel || '';
     el.date.value = v.date || '';
-    el.views.value = v.views ?? 0;
-    el.likes.value = v.likes ?? 0;
-    el.comments.value = v.comments ?? 0;
-    el.reposts.value = v.reposts ?? 0;
 
     el.hasUtm.checked = !!v.hasUtm;
     el.conversions.value = v.conversions ?? 0;
     toggleUtmUI();
+
+    // Load platform rows
+    el.platformRows.innerHTML = '';
+    (v.platforms || []).forEach(p => addPlatformRow(p));
+    if (!el.platformRows.children.length) addPlatformRow({ platform: 'Instagram' });
 
     el.saveBtn.textContent = 'Update';
     el.cancelEditBtn.style.display = 'inline-block';
@@ -700,13 +883,10 @@
       channel: (el.channel.value || '').trim(),
       date: el.date.value,
 
-      views: clampNonNeg(el.views.value),
-      likes: clampNonNeg(el.likes.value),
-      comments: clampNonNeg(el.comments.value),
-      reposts: clampNonNeg(el.reposts.value),
-
       hasUtm: !!el.hasUtm.checked,
-      conversions: el.hasUtm.checked ? clampNonNeg(el.conversions.value) : 0
+      conversions: el.hasUtm.checked ? clampNonNeg(el.conversions.value) : 0,
+
+      platforms: readPlatformsFromForm()
     };
 
     if (!payload.title) {
@@ -736,44 +916,64 @@
   // -----------------------------
   function renderTotals() {
     el.totals.videos.textContent = nf.format(state.videos.length);
-    el.totals.views.textContent = nf.format(sumBy(state.videos, 'views'));
-    el.totals.likes.textContent = nf.format(sumBy(state.videos, 'likes'));
-    el.totals.comments.textContent = nf.format(sumBy(state.videos, 'comments'));
-    el.totals.reposts.textContent = nf.format(sumBy(state.videos, 'reposts'));
-    el.totals.conversions.textContent = nf.format(sumBy(state.videos, 'conversions'));
+
+    const totals = state.videos.reduce((acc, v) => {
+      const a = aggregateVideo(v);
+      acc.views += a.views;
+      acc.likes += a.likes;
+      acc.comments += a.comments;
+      acc.reposts += a.reposts;
+      acc.conversions += a.conversions;
+      return acc;
+    }, { views:0, likes:0, comments:0, reposts:0, conversions:0 });
+
+    el.totals.views.textContent = nf.format(totals.views);
+    el.totals.likes.textContent = nf.format(totals.likes);
+    el.totals.comments.textContent = nf.format(totals.comments);
+    el.totals.reposts.textContent = nf.format(totals.reposts);
+    el.totals.conversions.textContent = nf.format(totals.conversions);
   }
 
   function renderTable() {
     if (state.videos.length === 0) {
-      el.table.innerHTML = `<tr><td class="empty" colspan="10">Aún no hay videos. Ve a “Add / Edit” para cargar el primero.</td></tr>`;
+      el.table.innerHTML = `<tr><td class="empty" colspan="11">Aún no hay videos. Ve a “Add / Edit” para cargar el primero.</td></tr>`;
       return;
     }
 
     el.table.innerHTML = state.videos
       .slice()
-      .sort((a, b) => (b.date || '').localeCompare(a.date || '')) // por fecha desc
-      .map(v => `
-        <tr>
-          <td class="wrap"><strong>${escapeHtml(v.title)}</strong></td>
-          <td class="wrap">${escapeHtml(v.channel || '—')}</td>
-          <td>${formatDateISO(v.date)}</td>
-          <td>${nf.format(v.views || 0)}</td>
-          <td>${nf.format(v.likes || 0)}</td>
-          <td>${nf.format(v.comments || 0)}</td>
-          <td>${nf.format(v.reposts || 0)}</td>
-          <td>${v.hasUtm ? 'UTM' : '—'}</td>
-          <td>${nf.format(v.conversions || 0)}</td>
-          <td>
-            <div class="actions">
-              <button class="btn" type="button" data-edit="${v.id}">Edit</button>
-              <button class="btn btn-danger" type="button" data-del="${v.id}">Delete</button>
-            </div>
-          </td>
-        </tr>
-      `)
+      .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+      .map(raw => {
+        const v = ensurePlatforms(raw);
+        const a = aggregateVideo(v);
+
+        const platformsHtml = (v.platforms || []).length
+          ? `<div class="platform-chips">${v.platforms.map(p => `<span class="platform-pill">${escapeHtml(p.platform)}</span>`).join('')}</div>`
+          : `<span class="muted">—</span>`;
+
+        return `
+          <tr>
+            <td class="wrap"><strong>${escapeHtml(v.title)}</strong></td>
+            <td class="wrap">${escapeHtml(v.channel || '—')}</td>
+            <td>${formatDateISO(v.date)}</td>
+            <td class="wrap">${platformsHtml}</td>
+            <td>${nf.format(a.views)}</td>
+            <td>${nf.format(a.likes)}</td>
+            <td>${nf.format(a.comments)}</td>
+            <td>${nf.format(a.reposts)}</td>
+            <td>${v.hasUtm ? 'UTM' : '—'}</td>
+            <td>${nf.format(a.conversions)}</td>
+            <td>
+              <div class="actions">
+                <button class="btn" type="button" data-edit="${v.id}">Edit</button>
+                <button class="btn btn-danger" type="button" data-del="${v.id}">Delete</button>
+              </div>
+            </td>
+          </tr>
+        `;
+      })
       .join('');
 
-    // Bind actions
     el.table.querySelectorAll('[data-edit]').forEach(btn => {
       btn.addEventListener('click', () => startEdit(btn.dataset.edit));
     });
@@ -788,33 +988,32 @@
       return;
     }
 
-    const max = maxima(state.videos);
+    const max = maximaAgg(state.videos);
 
-    // calcula score normalizado 0..1
-    const scored = state.videos.map(v => {
-      const score = computeScore(v, max);
-      return { v, score };
+    const scored = state.videos.map(raw => {
+      const v = ensurePlatforms(raw);
+      const agg = aggregateVideo(v);
+      const score = computeScoreAgg(agg, max);
+      return { v, agg, score };
     });
 
-    // Orden según selector
     let ordered;
     if (state.rankSort === 'score') {
       ordered = scored.slice().sort((a, b) => b.score - a.score);
     } else {
       const k = state.rankSort;
-      ordered = scored.slice().sort((a, b) => (b.v[k] || 0) - (a.v[k] || 0));
+      ordered = scored.slice().sort((a, b) => (b.agg[k] || 0) - (a.agg[k] || 0));
     }
 
     const bestScore = ordered[0]?.score || 1;
 
     el.rankingList.innerHTML = ordered.slice(0, 5).map((r, i) => {
       const v = r.v;
+      const agg = r.agg;
 
-      // Desglose normalizado (para explicar el score)
       const parts = METRICS.map(m => {
-        const normalized = norm(v[m] || 0, max[m]);
-        const contrib = normalized * SCORE_WEIGHTS[m];
-        return { m, normalized, contrib, raw: v[m] || 0 };
+        const normalized = norm(agg[m] || 0, max[m]);
+        return { m, normalized, raw: agg[m] || 0 };
       });
 
       const scorePct = bestScore ? (r.score / bestScore) * 100 : 0;
@@ -855,11 +1054,13 @@
     el.metricByVideoTitle.textContent = `${label} by Video`;
     el.metricOverTimeTitle.textContent = `${label} over Time`;
 
-    // ---- Chart 1: Metric by video
-    const videoLabels = state.videos.map(v => v.title);
-    const videoData = state.videos.map(v => v[metric] || 0);
+    // Chart 1: Metric by video (aggregated)
+    const videoLabels = state.videos.map(v => ensurePlatforms(v).title);
+    const videoData = state.videos.map(v => {
+      const a = aggregateVideo(v);
+      return a[metric] || 0;
+    });
 
-    // Mejora: si hay muchos videos, horizontal
     const horizontal = state.videos.length > 8;
 
     if (chartMetric) chartMetric.destroy();
@@ -890,15 +1091,17 @@
       }
     });
 
-    // ---- Chart 2: Metric over time (agregado por fecha)
+    // Chart 2: Metric over time (aggregated by date)
     const byDate = new Map();
     for (const v of state.videos) {
-      const d = v.date || '—';
-      byDate.set(d, (byDate.get(d) || 0) + (Number(v[metric]) || 0));
+      const d = ensurePlatforms(v).date || '—';
+      const a = aggregateVideo(v);
+      byDate.set(d, (byDate.get(d) || 0) + (Number(a[metric]) || 0));
     }
+
     const dates = Array.from(byDate.keys())
       .filter(d => d !== '—')
-      .sort((a, b) => a.localeCompare(b)); // asc
+      .sort((a, b) => a.localeCompare(b));
 
     const timeLabels = dates.length ? dates.map(formatDateISO) : ['—'];
     const timeData = dates.length ? dates.map(d => byDate.get(d) || 0) : [0];
@@ -937,18 +1140,6 @@
   }
 
   // -----------------------------
-  // Security: escape HTML in table/ranking
-  // -----------------------------
-  function escapeHtml(str) {
-    return String(str ?? '')
-      .replaceAll('&', '&amp;')
-      .replaceAll('<', '&lt;')
-      .replaceAll('>', '&gt;')
-      .replaceAll('"', '&quot;')
-      .replaceAll("'", '&#039;');
-  }
-
-  // -----------------------------
   // Event bindings
   // -----------------------------
   el.navButtons.forEach(btn => {
@@ -967,6 +1158,10 @@
 
   el.hasUtm.addEventListener('change', toggleUtmUI);
 
+  el.addPlatformBtn.addEventListener('click', () => {
+    addPlatformRow({ platform: 'Instagram' });
+  });
+
   el.form.addEventListener('submit', upsertFromForm);
 
   el.cancelEditBtn.addEventListener('click', () => {
@@ -980,6 +1175,7 @@
   load();
   state.metric = el.metricSelect.value;
   state.rankSort = el.rankSort.value;
+  resetForm();
   render();
 </script>
 </body>
