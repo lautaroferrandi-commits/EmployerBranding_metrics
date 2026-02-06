@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Video Metrics Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- DM Sans -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <style>
+    :root {
+      --primary: #ff355e;
+      --bg: #f7f7f9;
+      --card: #ffffff;
+      --text: #111827;
+      --muted: #6b7280;
+      --border: #e5e7eb;
+      --shadow: 0 1px 2px rgba(0,0,0,.04);
+      --chip: rgba(255, 53, 94, 0.10);
+      --chipText: #b10a2c;
+      --focus: rgba(255, 53, 94, 0.25);
+      --good: #16a34a;
+      --danger: #dc2626;
+    }
+
+    * { box-sizing: border-box; }
+    body { margin:0; font-family:'DM Sans',sans-serif; background:var(--bg); color:var(--text); }
+
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      background: var(--card);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+    }
+
+    header h1 { margin: 0; font-size: 18px; }
+
+    nav { display: flex; align-items: center; gap: 10px; }
+
+    nav button {
+      background: none;
+      border: none;
+      font-weight: 800;
+      cursor: pointer;
+      color: var(--muted);
+      padding: 8px 10px;
+      border-radius: 10px;
+    }
+
+    nav button:hover { background: #f3f4f6; }
+    nav button.active { color: var(--primary); background: rgba(255,53,94,0.06); }
+
+    main { padding: 20px; max-width: 1200px; margin: 0 auto; }
+
+    .page { display: none; }
+    .page.active { display: block; }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 12px;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px;
+      box-shadow: var(--shadow);
+    }
+
+    .card .k {
+      font-size: 11px;
+      color: var(--muted);
+      text-transform: uppercase;
+      font-weight: 800;
+      letter-spacing: .04em;
+    }
+
+    .card .v {
+      font-size: 26px;
+      font-weight: 900;
+      margin-top: 2px;
+    }
+
+    /* NUEVO: barra de filtros */
+    .filters {
+      margin: 14px 0 6px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px;
+      box-shadow: var(--shadow);
+      display: flex;
+      gap: 10px;
+      align-items: end;
+      flex-wrap: wrap;
+    }
+    .filters .field { min-width: 170px; }
+    .filters label {
+      display: block;
+      font-size: 11px;
+      font-weight: 900;
+      color: var(--muted);
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    .chart-area {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px;
+      height: 340px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .chart-title {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+      gap: 12px;
+    }
+
+    .chart-title h3 { margin: 0; font-size: 14px; font-weight: 900; }
+
+    .mini-select {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 6px 10px;
+      font-weight: 800;
+      font-family: inherit;
+      background: white;
+      cursor: pointer;
+      outline: none;
+    }
+    .mini-select:focus { box-shadow: 0 0 0 4px var(--focus); border-color: var(--primary); }
+
+    .ranking {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px;
+      margin-top: 20px;
+      box-shadow: var(--shadow);
+    }
+
+    .ranking-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 8px;
+      flex-wrap: wrap;
+    }
+
+    .ranking-head h3 { margin: 0; font-size: 14px; font-weight: 900; }
+
+    .rank-item {
+      display: grid;
+      grid-template-columns: 30px 1fr auto;
+      gap: 12px;
+      padding: 10px 0;
+      border-top: 1px solid var(--border);
+    }
+    .rank-item:first-child { border-top: none; }
+
+    .rank-num {
+      width: 28px;
+      height: 28px;
+      border-radius: 999px;
+      background: var(--chip);
+      color: var(--primary);
+      display: grid;
+      place-items: center;
+      font-weight: 900;
+    }
+
+    .rank-title { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+    .rank-title strong { font-weight: 900; }
+    .rank-sub { color: var(--muted); font-size: 12px; font-weight: 700; }
+
+    .rank-bar {
+      height: 7px;
+      background: #eee;
+      border-radius: 999px;
+      overflow: hidden;
+      margin-top: 8px;
+    }
+
+    .rank-bar > div {
+      height: 100%;
+      background: var(--primary);
+      width: 0%;
+      transition: width 220ms ease;
+    }
+
+    .rank-breakdown {
+      margin-top: 8px;
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .chip {
+      background: #f9fafb;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 6px 8px;
+      font-size: 11px;
+      line-height: 1.1;
+    }
+    .chip .label { color: var(--muted); font-weight: 800; text-transform: uppercase; letter-spacing: .03em; }
+    .chip .value { font-weight: 900; margin-top: 2px; }
+
+    .platform-chips { display:flex; gap:6px; flex-wrap:wrap; }
+    .platform-pill {
+      display:inline-flex;
+      align-items:center;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,53,94,0.22);
+      background: rgba(255,53,94,0.06);
+      color: var(--chipText);
+      font-size: 12px;
+      font-weight: 900;
+      text-decoration: none;
+      cursor: default;
+    }
+    .platform-pill.clickable { cursor: pointer; }
+    .platform-pill.clickable:hover { filter: brightness(0.98); }
+    .platform-pill.clickable:focus { outline:none; box-shadow: 0 0 0 4px var(--focus); }
+
+    .platform-list { display: grid; gap: 10px; }
+    .platform-item { display:flex; flex-wrap:wrap; align-items:center; gap: 8px; }
+    .platform-metrics { width:100%; font-size: 11px; font-weight: 800; color: var(--muted); margin-top: -2px; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: var(--shadow);
+    }
+
+    th, td {
+      padding: 10px;
+      border-bottom: 1px solid var(--border);
+      font-size: 13px;
+      text-align: left;
+      vertical-align: top;
+      white-space: nowrap;
+    }
+
+    th {
+      font-size: 11px;
+      text-transform: uppercase;
+      color: var(--muted);
+      letter-spacing: .04em;
+    }
+
+    td.wrap { white-space: normal; }
+
+    .muted { color: var(--muted); }
+
+    .actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .btn {
+      border: 1px solid var(--border);
+      background: white;
+      border-radius: 10px;
+      padding: 6px 10px;
+      font-weight: 900;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 12px;
+    }
+    .btn:hover { background: #f9fafb; }
+    .btn:focus { outline: none; box-shadow: 0 0 0 4px var(--focus); border-color: var(--primary); }
+
+    .btn-primary {
+      background: var(--primary);
+      border-color: var(--primary);
+      color: white;
+    }
+    .btn-primary:hover { filter: brightness(0.98); }
+
+    .btn-danger {
+      border-color: rgba(220,38,38,.25);
+      color: var(--danger);
+      background: rgba(220,38,38,.04);
+    }
+    .btn-danger:hover { background: rgba(220,38,38,.08); }
+
+    .empty {
+      padding: 16px;
+      color: var(--muted);
+      font-weight: 800;
+      text-align: center;
+    }
+
+    form {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      max-width: 860px;
+      box-shadow: var(--shadow);
+    }
+
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .form-row.one { grid-template-columns: 1fr; }
+
+    label {
+      display: block;
+      font-size: 12px;
+      font-weight: 900;
+      color: var(--muted);
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+    }
+
+    input, select {
+      width: 100%;
+      padding: 10px 10px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      font: inherit;
+      outline: none;
+      background: white;
+    }
+    input:focus, select:focus { box-shadow: 0 0 0 4px var(--focus); border-color: var(--primary); }
+
+    .checkbox {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 10px 0 2px;
+    }
+    .checkbox input { width: auto; }
+
+    .form-actions { display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+
+    .hint {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 10px;
+      font-weight: 700;
+    }
+
+    .platform-block {
+      margin-top: 14px;
+      border-top: 1px solid var(--border);
+      padding-top: 14px;
+    }
+
+    .platform-head {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+
+    .platform-head h3 {
+      margin: 0;
+      font-size: 13px;
+      font-weight: 900;
+    }
+
+    .platform-row {
+      border: 1px dashed var(--border);
+      border-radius: 12px;
+      padding: 12px;
+      margin-bottom: 10px;
+      background: #fff;
+    }
+
+    .platform-row .row {
+      display:grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 10px;
+    }
+
+    .platform-row .row.one { grid-template-columns: 1fr; }
+    .platform-row .row + .row { margin-top: 10px; }
+
+    /* NUEVO: links del título */
+    a.video-link {
+      color: var(--text);
+      text-decoration: none;
+      font-weight: 900;
+    }
+    a.video-link:hover { text-decoration: underline; }
+    a.video-link:focus { outline:none; box-shadow: 0 0 0 4px var(--focus); border-radius: 6px; }
+
+    @media (max-width: 900px) {
+      .grid-2 { grid-template-columns: 1fr; }
+      th, td { white-space: normal; }
+      .rank-breakdown { grid-template-columns: 1fr 1fr; }
+      .form-row { grid-template-columns: 1fr; }
+      .platform-row .row { grid-template-columns: 1fr; }
+      .filters .field { min-width: 140px; }
+    }
+  </style>
+</head>
+<body>
+<header>
+  <h1>Video Analytics</h1>
+  <nav>
+    <button class="active" data-page="dashboard" type="button">Dashboard</button>
+    <button data-page="form" type="button">Add / Edit</button>
+  </nav>
+</header>
+
+<main>
+  <section id="dashboard" class="page active">
+
+    <div class="cards">
+      <div class="card"><div class="k">Videos</div><div class="v" id="totalVideos">0</div></div>
+      <div class="card"><div class="k">Views</div><div class="v" id="totalViews">0</div></div>
+      <div class="card"><div class="k">Likes</div><div class="v" id="totalLikes">0</div></div>
+      <div class="card"><div class="k">Comments</div><div class="v" id="totalComments">0</div></div>
+      <div class="card"><div class="k">Reposts</div><div class="v" id="totalReposts">0</div></div>
+      <div class="card"><div class="k">Conversions</div><div class="v" id="totalConversions">0</div></div>
+    </div>
+
+    <!-- NUEVO: Filtro por fecha -->
+    <div class="filters">
+      <div class="field">
+        <label for="dateFrom">Date from</label>
+        <input type="date" id="dateFrom" />
+      </div>
+      <div class="field">
+        <label for="dateTo">Date to</label>
+        <input type="date" id="dateTo" />
+      </div>
+      <button class="btn" id="clearDatesBtn" type="button">Clear (All dates)</button>
+      <div class="muted" style="font-size:12px; font-weight:800;">
+        El filtro aplica a totales, ranking, charts y tabla.
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="chart-area">
+        <div class="chart-title">
+          <h3 id="metricByVideoTitle">Views by Video</h3

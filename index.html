@@ -148,6 +148,7 @@
       justify-content: space-between;
       gap: 12px;
       margin-bottom: 8px;
+      flex-wrap: wrap;
     }
 
     .ranking-head h3 { margin: 0; font-size: 14px; font-weight: 900; }
@@ -221,6 +222,26 @@
       font-size: 12px;
       font-weight: 900;
     }
+
+    /* NUEVO: detalle por plataforma en tabla */
+    .platform-list { display: grid; gap: 10px; }
+    .platform-item { display:flex; flex-wrap:wrap; align-items:center; gap: 8px; }
+    .platform-metrics { width:100%; font-size: 11px; font-weight: 800; color: var(--muted); margin-top: -2px; }
+    .platform-link {
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      font-size: 11px;
+      font-weight: 900;
+      color: var(--primary);
+      text-decoration: none;
+      border: 1px solid rgba(255,53,94,0.22);
+      background: rgba(255,53,94,0.06);
+      padding: 5px 8px;
+      border-radius: 10px;
+    }
+    .platform-link:hover { filter: brightness(0.98); }
+    .platform-link:focus { outline: none; box-shadow: 0 0 0 4px var(--focus); }
 
     table {
       width: 100%;
@@ -421,13 +442,18 @@
       <div class="chart-area">
         <div class="chart-title">
           <h3 id="metricByVideoTitle">Views by Video</h3>
-          <select id="metricSelect" class="mini-select">
-            <option value="views">Views</option>
-            <option value="likes">Likes</option>
-            <option value="comments">Comments</option>
-            <option value="reposts">Reposts</option>
-            <option value="conversions">Conversions</option>
-          </select>
+          <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+            <!-- NUEVO: filtro por plataforma -->
+            <select id="platformFilter" class="mini-select" title="Filtrar por plataforma"></select>
+
+            <select id="metricSelect" class="mini-select">
+              <option value="views">Views</option>
+              <option value="likes">Likes</option>
+              <option value="comments">Comments</option>
+              <option value="reposts">Reposts</option>
+              <option value="conversions">Conversions</option>
+            </select>
+          </div>
         </div>
         <canvas id="metricChart"></canvas>
       </div>
@@ -443,14 +469,20 @@
     <div class="ranking">
       <div class="ranking-head">
         <h3>Top Performing Videos</h3>
-        <select id="rankSort" class="mini-select" title="Ordenar ranking">
-          <option value="score">Score (compuesto)</option>
-          <option value="views">Views</option>
-          <option value="likes">Likes</option>
-          <option value="comments">Comments</option>
-          <option value="reposts">Reposts</option>
-          <option value="conversions">Conversions</option>
-        </select>
+
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+          <!-- NUEVO: filtro por plataforma (sincronizado con el de arriba) -->
+          <select id="rankPlatformFilter" class="mini-select" title="Filtrar por plataforma"></select>
+
+          <select id="rankSort" class="mini-select" title="Ordenar ranking">
+            <option value="score">Score (compuesto)</option>
+            <option value="views">Views</option>
+            <option value="likes">Likes</option>
+            <option value="comments">Comments</option>
+            <option value="reposts">Reposts</option>
+            <option value="conversions">Conversions</option>
+          </select>
+        </div>
       </div>
       <div id="rankingList"></div>
     </div>
@@ -572,10 +604,6 @@
     return new Intl.DateTimeFormat('es-ES', { year:'numeric', month:'2-digit', day:'2-digit' }).format(d);
   }
 
-  function sumBy(videos, key) {
-    return videos.reduce((a, v) => a + (Number(v[key]) || 0), 0);
-  }
-
   function escapeHtml(str) {
     return String(str ?? '')
       .replaceAll('&', '&amp;')
@@ -583,6 +611,22 @@
       .replaceAll('>', '&gt;')
       .replaceAll('"', '&quot;')
       .replaceAll("'", '&#039;');
+  }
+
+  // NUEVO: normaliza URL y bloquea esquemas peligrosos
+  function normalizeUrl(raw) {
+    let s = String(raw ?? '').trim();
+    if (!s) return '';
+
+    // si no tiene esquema, asumimos https://
+    const hasScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(s);
+    if (!hasScheme) s = 'https://' + s.replace(/^\/\//, '');
+
+    try {
+      const u = new URL(s);
+      if (u.protocol === 'http:' || u.protocol === 'https:') return u.href;
+    } catch (e) {}
+    return '';
   }
 
   // -----------------------------
@@ -594,6 +638,7 @@
 
     const legacy = {
       platform: 'YouTube',
+      url: '',
       views: Number(video.views) || 0,
       likes: Number(video.likes) || 0,
       comments: Number(video.comments) || 0,
@@ -611,10 +656,17 @@
     };
   }
 
-  function aggregateVideo(video) {
+  // NUEVO: agregación filtrable por plataforma
+  function aggregateVideoForPlatform(video, platformFilter = 'all') {
     const v = ensurePlatforms(video);
-    const totals = { views: 0, likes: 0, comments: 0, reposts: 0, conversions: v.hasUtm ? (Number(v.conversions) || 0) : 0 };
-    for (const p of (v.platforms || [])) {
+    const totals = {
+      views: 0, likes: 0, comments: 0, reposts: 0,
+      conversions: v.hasUtm ? (Number(v.conversions) || 0) : 0
+    };
+
+    const rows = v.platforms || [];
+    for (const p of rows) {
+      if (platformFilter && platformFilter !== 'all' && p.platform !== platformFilter) continue;
       totals.views += Number(p.views) || 0;
       totals.likes += Number(p.likes) || 0;
       totals.comments += Number(p.comments) || 0;
@@ -623,11 +675,16 @@
     return totals;
   }
 
-  function maximaAgg(videos) {
+  // (compat: por si usas este nombre en otro lado)
+  function aggregateVideo(video) {
+    return aggregateVideoForPlatform(video, 'all');
+  }
+
+  function maximaAgg(videos, platformFilter = 'all') {
     const max = { views: 0, likes: 0, comments: 0, reposts: 0, conversions: 0 };
     for (const raw of videos) {
       const v = ensurePlatforms(raw);
-      const a = aggregateVideo(v);
+      const a = aggregateVideoForPlatform(v, platformFilter);
       for (const m of METRICS) max[m] = Math.max(max[m], Number(a[m]) || 0);
     }
     return max;
@@ -655,6 +712,7 @@
     videos: [],
     metric: 'views',
     rankSort: 'score',
+    platformFilter: 'all',
     editingId: null
   };
 
@@ -673,6 +731,8 @@
       conversions: document.getElementById('totalConversions')
     },
     metricSelect: document.getElementById('metricSelect'),
+    platformFilter: document.getElementById('platformFilter'),
+    rankPlatformFilter: document.getElementById('rankPlatformFilter'),
     metricByVideoTitle: document.getElementById('metricByVideoTitle'),
     metricOverTimeTitle: document.getElementById('metricOverTimeTitle'),
     rankSort: document.getElementById('rankSort'),
@@ -735,6 +795,31 @@
   }
 
   // -----------------------------
+  // Platform filters (dashboard)
+  // -----------------------------
+  function populatePlatformFilters() {
+    const options = [
+      { value: 'all', label: 'All platforms' },
+      ...PLATFORMS.map(p => ({ value: p, label: p }))
+    ];
+
+    const html = options.map(o => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`).join('');
+    el.platformFilter.innerHTML = html;
+    el.rankPlatformFilter.innerHTML = html;
+
+    el.platformFilter.value = state.platformFilter;
+    el.rankPlatformFilter.value = state.platformFilter;
+  }
+
+  function setPlatformFilter(value) {
+    state.platformFilter = value || 'all';
+    if (el.platformFilter.value !== state.platformFilter) el.platformFilter.value = state.platformFilter;
+    if (el.rankPlatformFilter.value !== state.platformFilter) el.rankPlatformFilter.value = state.platformFilter;
+    renderRanking();
+    renderCharts();
+  }
+
+  // -----------------------------
   // Platform rows (form)
   // -----------------------------
   function platformRowTemplate(data = {}) {
@@ -744,6 +829,7 @@
     const likes = Number.isFinite(Number(data.likes)) ? Number(data.likes) : 0;
     const comments = Number.isFinite(Number(data.comments)) ? Number(data.comments) : 0;
     const reposts = Number.isFinite(Number(data.reposts)) ? Number(data.reposts) : 0;
+    const url = data.url ? String(data.url) : '';
 
     return `
       <div class="platform-row" data-row="${rowId}">
@@ -776,14 +862,20 @@
             <button class="btn btn-danger" type="button" data-remove="${rowId}">Remove</button>
           </div>
         </div>
+
+        <!-- NUEVO: URL de publicación -->
+        <div class="row one">
+          <div>
+            <label>Post URL</label>
+            <input class="p-url" type="url" placeholder="https://..." value="${escapeHtml(url)}" />
+          </div>
+        </div>
       </div>
     `;
   }
 
   function addPlatformRow(data) {
     el.platformRows.insertAdjacentHTML('beforeend', platformRowTemplate(data));
-    const removeBtn = el.platformRows.querySelector(`[data-remove="${el.platformRows.lastElementChild?.dataset?.row}"]`);
-    // Bind remove safely (also for older rows)
     bindPlatformRemoveButtons();
   }
 
@@ -809,10 +901,10 @@
       likes: clampNonNeg(r.querySelector('.p-likes')?.value),
       comments: clampNonNeg(r.querySelector('.p-comments')?.value),
       reposts: clampNonNeg(r.querySelector('.p-reposts')?.value),
+      url: normalizeUrl(r.querySelector('.p-url')?.value),
     }));
 
-    // Remove empty duplicates? (Optional) Keep as-is.
-    return platforms.length ? platforms : [{ platform: 'Instagram', views: 0, likes: 0, comments: 0, reposts: 0 }];
+    return platforms.length ? platforms : [{ platform: 'Instagram', url:'', views: 0, likes: 0, comments: 0, reposts: 0 }];
   }
 
   // -----------------------------
@@ -918,7 +1010,7 @@
     el.totals.videos.textContent = nf.format(state.videos.length);
 
     const totals = state.videos.reduce((acc, v) => {
-      const a = aggregateVideo(v);
+      const a = aggregateVideoForPlatform(v, 'all');
       acc.views += a.views;
       acc.likes += a.likes;
       acc.comments += a.comments;
@@ -945,10 +1037,28 @@
       .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
       .map(raw => {
         const v = ensurePlatforms(raw);
-        const a = aggregateVideo(v);
+        const a = aggregateVideoForPlatform(v, 'all');
 
+        // NUEVO: muestra cada plataforma con métricas + link
         const platformsHtml = (v.platforms || []).length
-          ? `<div class="platform-chips">${v.platforms.map(p => `<span class="platform-pill">${escapeHtml(p.platform)}</span>`).join('')}</div>`
+          ? `<div class="platform-list">${
+              v.platforms.map(p => {
+                const postUrl = normalizeUrl(p.url);
+                const linkHtml = postUrl
+                  ? `<a class="platform-link" href="${escapeHtml(postUrl)}" target="_blank" rel="noopener">Link</a>`
+                  : `<span class="muted" style="font-size:11px; font-weight:900;">—</span>`;
+
+                return `
+                  <div class="platform-item">
+                    <span class="platform-pill">${escapeHtml(p.platform || '—')}</span>
+                    ${linkHtml}
+                    <div class="platform-metrics">
+                      V:${nf.format(Number(p.views)||0)} · L:${nf.format(Number(p.likes)||0)} · C:${nf.format(Number(p.comments)||0)} · R:${nf.format(Number(p.reposts)||0)}
+                    </div>
+                  </div>
+                `;
+              }).join('')
+            }</div>`
           : `<span class="muted">—</span>`;
 
         return `
@@ -973,13 +1083,6 @@
         `;
       })
       .join('');
-
-    el.table.querySelectorAll('[data-edit]').forEach(btn => {
-      btn.addEventListener('click', () => startEdit(btn.dataset.edit));
-    });
-    el.table.querySelectorAll('[data-del]').forEach(btn => {
-      btn.addEventListener('click', () => deleteVideo(btn.dataset.del));
-    });
   }
 
   function renderRanking() {
@@ -988,11 +1091,11 @@
       return;
     }
 
-    const max = maximaAgg(state.videos);
+    const max = maximaAgg(state.videos, state.platformFilter);
 
     const scored = state.videos.map(raw => {
       const v = ensurePlatforms(raw);
-      const agg = aggregateVideo(v);
+      const agg = aggregateVideoForPlatform(v, state.platformFilter);
       const score = computeScoreAgg(agg, max);
       return { v, agg, score };
     });
@@ -1024,7 +1127,7 @@
           <div>
             <div class="rank-title">
               <strong>${escapeHtml(v.title)}</strong>
-              <span class="rank-sub">${escapeHtml(v.channel || '—')} · ${formatDateISO(v.date)}</span>
+              <span class="rank-sub">${escapeHtml(v.channel || '—')} · ${formatDateISO(v.date)} · ${state.platformFilter === 'all' ? 'All platforms' : escapeHtml(state.platformFilter)}</span>
             </div>
 
             <div class="rank-bar"><div style="width:${scorePct.toFixed(1)}%"></div></div>
@@ -1050,14 +1153,15 @@
   function renderCharts() {
     const metric = state.metric;
     const label = METRIC_LABEL[metric] || 'Metric';
+    const pfLabel = state.platformFilter === 'all' ? 'All platforms' : state.platformFilter;
 
-    el.metricByVideoTitle.textContent = `${label} by Video`;
-    el.metricOverTimeTitle.textContent = `${label} over Time`;
+    el.metricByVideoTitle.textContent = `${label} by Video · ${pfLabel}`;
+    el.metricOverTimeTitle.textContent = `${label} over Time · ${pfLabel}`;
 
-    // Chart 1: Metric by video (aggregated)
-    const videoLabels = state.videos.map(v => ensurePlatforms(v).title);
+    // Chart 1: Metric by video (filtered by platform)
+    const videoLabels = state.videos.map(v => ensurePlatforms(v).title || '—');
     const videoData = state.videos.map(v => {
-      const a = aggregateVideo(v);
+      const a = aggregateVideoForPlatform(v, state.platformFilter);
       return a[metric] || 0;
     });
 
@@ -1091,11 +1195,11 @@
       }
     });
 
-    // Chart 2: Metric over time (aggregated by date)
+    // Chart 2: Metric over time (filtered by platform, aggregated by date)
     const byDate = new Map();
     for (const v of state.videos) {
       const d = ensurePlatforms(v).date || '—';
-      const a = aggregateVideo(v);
+      const a = aggregateVideoForPlatform(v, state.platformFilter);
       byDate.set(d, (byDate.get(d) || 0) + (Number(a[metric]) || 0));
     }
 
@@ -1148,8 +1252,12 @@
 
   el.metricSelect.addEventListener('change', () => {
     state.metric = el.metricSelect.value;
-    render();
+    renderCharts();
+    renderRanking();
   });
+
+  el.platformFilter.addEventListener('change', () => setPlatformFilter(el.platformFilter.value));
+  el.rankPlatformFilter.addEventListener('change', () => setPlatformFilter(el.rankPlatformFilter.value));
 
   el.rankSort.addEventListener('change', () => {
     state.rankSort = el.rankSort.value;
@@ -1169,12 +1277,44 @@
     showPage('dashboard');
   });
 
+  // NUEVO: Event delegation para que Delete/Edit siempre funcione
+  el.table.addEventListener('click', (e) => {
+    const editBtn = e.target.closest('[data-edit]');
+    if (editBtn) startEdit(editBtn.dataset.edit);
+
+    const delBtn = e.target.closest('[data-del]');
+    if (delBtn) deleteVideo(delBtn.dataset.del);
+  });
+
+  // -----------------------------
+  // Dev API (para "acceder por separado y usar por separado")
+  // -----------------------------
+  window.VideoAnalytics = {
+    getVideos: () => state.videos.slice(),
+    getVideo: (id) => state.videos.find(v => v.id === id) || null,
+    getPlatforms: (id) => (state.videos.find(v => v.id === id)?.platforms || []).slice(),
+    getPlatform: (id, platformName) => {
+      const v = state.videos.find(v => v.id === id);
+      if (!v) return null;
+      return (v.platforms || []).find(p => p.platform === platformName) || null;
+    },
+    aggregate: (id, platformFilter = 'all') => {
+      const v = state.videos.find(v => v.id === id);
+      if (!v) return null;
+      return aggregateVideoForPlatform(v, platformFilter);
+    }
+  };
+
   // -----------------------------
   // Init
   // -----------------------------
   load();
   state.metric = el.metricSelect.value;
   state.rankSort = el.rankSort.value;
+
+  populatePlatformFilters();
+  setPlatformFilter('all');
+
   resetForm();
   render();
 </script>
