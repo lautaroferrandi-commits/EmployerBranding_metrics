@@ -474,4 +474,920 @@
     <div class="grid-2">
       <div class="chart-area">
         <div class="chart-title">
-          <h3 id="metricByVideoTitle">Views by Video</h3
+          <h3 id="metricByVideoTitle">Views by Video</h3>
+          <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+            <select id="platformFilter" class="mini-select" title="Filtrar por plataforma"></select>
+
+            <select id="metricSelect" class="mini-select">
+              <option value="views">Views</option>
+              <option value="likes">Likes</option>
+              <option value="comments">Comments</option>
+              <option value="reposts">Reposts</option>
+              <option value="conversions">Conversions</option>
+            </select>
+          </div>
+        </div>
+        <canvas id="metricChart"></canvas>
+      </div>
+
+      <div class="chart-area">
+        <div class="chart-title">
+          <h3 id="metricOverTimeTitle">Views over Time</h3>
+        </div>
+        <canvas id="metricTimeChart"></canvas>
+      </div>
+    </div>
+
+    <div class="ranking">
+      <div class="ranking-head">
+        <h3>Top Performing Videos</h3>
+
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+          <select id="rankPlatformFilter" class="mini-select" title="Filtrar por plataforma"></select>
+
+          <select id="rankSort" class="mini-select" title="Ordenar ranking">
+            <option value="score">Score (compuesto)</option>
+            <option value="views">Views</option>
+            <option value="likes">Likes</option>
+            <option value="comments">Comments</option>
+            <option value="reposts">Reposts</option>
+            <option value="conversions">Conversions</option>
+          </select>
+        </div>
+      </div>
+      <div id="rankingList"></div>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Video</th>
+          <th>Channel</th>
+          <th>Date</th>
+          <th>Platforms</th>
+          <th>Views</th>
+          <th>Likes</th>
+          <th>Comments</th>
+          <th>Reposts</th>
+          <th>UTM</th>
+          <th>Conversions</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="videoTable"></tbody>
+    </table>
+  </section>
+
+  <section id="form" class="page">
+    <form id="videoForm">
+      <input type="hidden" id="videoId" />
+
+      <div class="form-row one">
+        <div>
+          <label for="title">Video title</label>
+          <input id="title" placeholder="Ej: Black Friday Teaser" required />
+        </div>
+      </div>
+
+      <!-- NUEVO: Video URL -->
+      <div class="form-row one">
+        <div>
+          <label for="videoUrl">Video URL (master)</label>
+          <input id="videoUrl" type="url" placeholder="https://..." />
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div>
+          <label for="channel">Channel</label>
+          <input id="channel" placeholder="Ej: Factorial ES" />
+        </div>
+        <div>
+          <label for="date">Date</label>
+          <input type="date" id="date" required />
+        </div>
+      </div>
+
+      <div class="checkbox">
+        <input type="checkbox" id="hasUtm" />
+        <label for="hasUtm" style="margin:0; text-transform:none; letter-spacing:0; font-weight:900; color:var(--text);">
+          Has UTM link
+        </label>
+      </div>
+
+      <div class="form-row one" id="conversionsRow" style="display:none;">
+        <div>
+          <label for="conversions">Conversions (manual)</label>
+          <input type="number" id="conversions" placeholder="0" min="0" step="1" />
+        </div>
+      </div>
+
+      <div class="platform-block">
+        <div class="platform-head">
+          <h3>Platforms</h3>
+          <button class="btn" id="addPlatformBtn" type="button">+ Add platform</button>
+        </div>
+        <div id="platformRows"></div>
+        <div class="hint">Tip: Add one row per platform (Instagram, LinkedIn, YouTube, TikTok, Oktopost). Totals are aggregated across all platforms.</div>
+      </div>
+
+      <div class="form-actions">
+        <button class="btn btn-primary" id="saveBtn" type="submit">Save</button>
+        <button class="btn" id="cancelEditBtn" type="button" style="display:none;">Cancel edit</button>
+      </div>
+
+      <div class="hint">
+        Nota: Conversions son a nivel video (asociadas al UTM), tal como pediste.
+      </div>
+    </form>
+  </section>
+</main>
+
+<script>
+  // -----------------------------
+  // Utils
+  // -----------------------------
+  const nf = new Intl.NumberFormat('es-ES');
+  const METRICS = ['views', 'likes', 'comments', 'reposts', 'conversions'];
+  const METRIC_LABEL = {
+    views: 'Views',
+    likes: 'Likes',
+    comments: 'Comments',
+    reposts: 'Reposts',
+    conversions: 'Conversions'
+  };
+
+  const PLATFORMS = ['Instagram', 'LinkedIn', 'YouTube', 'TikTok', 'Oktopost'];
+
+  const SCORE_WEIGHTS = {
+    views: 0.40,
+    likes: 0.20,
+    comments: 0.15,
+    reposts: 0.15,
+    conversions: 0.10
+  };
+
+  function uid() {
+    return 'v_' + Math.random().toString(16).slice(2) + Date.now().toString(16);
+  }
+
+  function clampNonNeg(n) {
+    n = Number(n);
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+  }
+
+  function formatDateISO(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso + 'T00:00:00');
+    return new Intl.DateTimeFormat('es-ES', { year:'numeric', month:'2-digit', day:'2-digit' }).format(d);
+  }
+
+  function escapeHtml(str) {
+    return String(str ?? '')
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#039;');
+  }
+
+  function normalizeUrl(raw) {
+    let s = String(raw ?? '').trim();
+    if (!s) return '';
+    const hasScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(s);
+    if (!hasScheme) s = 'https://' + s.replace(/^\/\//, '');
+    try {
+      const u = new URL(s);
+      if (u.protocol === 'http:' || u.protocol === 'https:') return u.href;
+    } catch (e) {}
+    return '';
+  }
+
+  // Trunca labels para charts
+  function truncateLabel(s, max = 22) {
+    s = String(s ?? '');
+    if (s.length <= max) return s;
+    return s.slice(0, Math.max(0, max - 1)) + '…';
+  }
+
+  // -----------------------------
+  // Aggregation helpers
+  // -----------------------------
+  function ensurePlatforms(video) {
+    if (Array.isArray(video.platforms)) {
+      return {
+        id: video.id || uid(),
+        title: video.title || '',
+        url: video.url || '',
+        channel: video.channel || '',
+        date: video.date || '',
+        hasUtm: !!video.hasUtm,
+        conversions: Number(video.conversions) || 0,
+        platforms: video.platforms
+      };
+    }
+
+    const legacy = {
+      platform: 'YouTube',
+      url: '',
+      views: Number(video.views) || 0,
+      likes: Number(video.likes) || 0,
+      comments: Number(video.comments) || 0,
+      reposts: Number(video.reposts) || 0
+    };
+
+    return {
+      id: video.id || uid(),
+      title: video.title || '',
+      url: video.url || '',
+      channel: video.channel || '',
+      date: video.date || '',
+      hasUtm: !!video.hasUtm,
+      conversions: Number(video.conversions) || 0,
+      platforms: [legacy]
+    };
+  }
+
+  function aggregateVideoForPlatform(video, platformFilter = 'all') {
+    const v = ensurePlatforms(video);
+    const totals = {
+      views: 0, likes: 0, comments: 0, reposts: 0,
+      conversions: v.hasUtm ? (Number(v.conversions) || 0) : 0
+    };
+
+    const rows = v.platforms || [];
+    for (const p of rows) {
+      if (platformFilter && platformFilter !== 'all' && p.platform !== platformFilter) continue;
+      totals.views += Number(p.views) || 0;
+      totals.likes += Number(p.likes) || 0;
+      totals.comments += Number(p.comments) || 0;
+      totals.reposts += Number(p.reposts) || 0;
+    }
+    return totals;
+  }
+
+  function maximaAgg(videos, platformFilter = 'all') {
+    const max = { views: 0, likes: 0, comments: 0, reposts: 0, conversions: 0 };
+    for (const raw of videos) {
+      const v = ensurePlatforms(raw);
+      const a = aggregateVideoForPlatform(v, platformFilter);
+      for (const m of METRICS) max[m] = Math.max(max[m], Number(a[m]) || 0);
+    }
+    return max;
+  }
+
+  function norm(value, max) {
+    if (!max || max <= 0) return 0;
+    return (value || 0) / max;
+  }
+
+  function computeScoreAgg(agg, max) {
+    let score = 0;
+    for (const m of METRICS) score += norm(agg[m] || 0, max[m]) * SCORE_WEIGHTS[m];
+    return score;
+  }
+
+  // -----------------------------
+  // State + Elements
+  // -----------------------------
+  const state = {
+    videos: [],
+    metric: 'views',
+    rankSort: 'score',
+    platformFilter: 'all',
+    editingId: null,
+
+    // NUEVO: date filter
+    dateFrom: '',
+    dateTo: ''
+  };
+
+  const el = {
+    pages: {
+      dashboard: document.getElementById('dashboard'),
+      form: document.getElementById('form'),
+    },
+    navButtons: Array.from(document.querySelectorAll('nav button')),
+    totals: {
+      videos: document.getElementById('totalVideos'),
+      views: document.getElementById('totalViews'),
+      likes: document.getElementById('totalLikes'),
+      comments: document.getElementById('totalComments'),
+      reposts: document.getElementById('totalReposts'),
+      conversions: document.getElementById('totalConversions')
+    },
+    metricSelect: document.getElementById('metricSelect'),
+    platformFilter: document.getElementById('platformFilter'),
+    rankPlatformFilter: document.getElementById('rankPlatformFilter'),
+    metricByVideoTitle: document.getElementById('metricByVideoTitle'),
+    metricOverTimeTitle: document.getElementById('metricOverTimeTitle'),
+    rankSort: document.getElementById('rankSort'),
+    rankingList: document.getElementById('rankingList'),
+    table: document.getElementById('videoTable'),
+
+    // date filter UI
+    dateFrom: document.getElementById('dateFrom'),
+    dateTo: document.getElementById('dateTo'),
+    clearDatesBtn: document.getElementById('clearDatesBtn'),
+
+    // Form
+    form: document.getElementById('videoForm'),
+    videoId: document.getElementById('videoId'),
+    title: document.getElementById('title'),
+    videoUrl: document.getElementById('videoUrl'),
+    channel: document.getElementById('channel'),
+    date: document.getElementById('date'),
+    hasUtm: document.getElementById('hasUtm'),
+    conversionsRow: document.getElementById('conversionsRow'),
+    conversions: document.getElementById('conversions'),
+    platformRows: document.getElementById('platformRows'),
+    addPlatformBtn: document.getElementById('addPlatformBtn'),
+    saveBtn: document.getElementById('saveBtn'),
+    cancelEditBtn: document.getElementById('cancelEditBtn')
+  };
+
+  let chartMetric = null;
+  let chartTime = null;
+
+  // -----------------------------
+  // Persistence
+  // -----------------------------
+  const STORAGE_KEY = 'video_analytics_v1';
+
+  function load() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) state.videos = parsed.map(ensurePlatforms);
+    } catch (e) {
+      console.warn('No se pudo leer localStorage:', e);
+    }
+  }
+
+  function persist() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state.videos));
+    } catch (e) {
+      console.warn('No se pudo guardar en localStorage:', e);
+    }
+  }
+
+  // -----------------------------
+  // Navigation
+  // -----------------------------
+  function showPage(pageId) {
+    Object.values(el.pages).forEach(p => p.classList.remove('active'));
+    el.pages[pageId].classList.add('active');
+
+    el.navButtons.forEach(b => b.classList.remove('active'));
+    el.navButtons.find(b => b.dataset.page === pageId)?.classList.add('active');
+  }
+
+  // -----------------------------
+  // Date filtering
+  // -----------------------------
+  function withinDateRange(videoIso) {
+    if (!videoIso) return false;
+    const from = state.dateFrom || '';
+    const to = state.dateTo || '';
+    if (!from && !to) return true; // all dates
+    if (from && videoIso < from) return false;
+    if (to && videoIso > to) return false;
+    return true;
+  }
+
+  function getFilteredVideos() {
+    // filtro por fecha aplica a todo el dashboard
+    return state.videos.filter(v => withinDateRange(ensurePlatforms(v).date));
+  }
+
+  function setDateFilters(from, to) {
+    state.dateFrom = from || '';
+    state.dateTo = to || '';
+    el.dateFrom.value = state.dateFrom;
+    el.dateTo.value = state.dateTo;
+    render();
+  }
+
+  // -----------------------------
+  // Platform filters (dashboard)
+  // -----------------------------
+  function populatePlatformFilters() {
+    const options = [
+      { value: 'all', label: 'All platforms' },
+      ...PLATFORMS.map(p => ({ value: p, label: p }))
+    ];
+
+    const html = options.map(o => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`).join('');
+    el.platformFilter.innerHTML = html;
+    el.rankPlatformFilter.innerHTML = html;
+
+    el.platformFilter.value = state.platformFilter;
+    el.rankPlatformFilter.value = state.platformFilter;
+  }
+
+  function setPlatformFilter(value) {
+    state.platformFilter = value || 'all';
+    if (el.platformFilter.value !== state.platformFilter) el.platformFilter.value = state.platformFilter;
+    if (el.rankPlatformFilter.value !== state.platformFilter) el.rankPlatformFilter.value = state.platformFilter;
+    render();
+  }
+
+  // -----------------------------
+  // Platform rows (form)
+  // -----------------------------
+  function platformRowTemplate(data = {}) {
+    const rowId = 'p_' + Math.random().toString(16).slice(2);
+    const platform = data.platform || 'Instagram';
+    const views = Number.isFinite(Number(data.views)) ? Number(data.views) : 0;
+    const likes = Number.isFinite(Number(data.likes)) ? Number(data.likes) : 0;
+    const comments = Number.isFinite(Number(data.comments)) ? Number(data.comments) : 0;
+    const reposts = Number.isFinite(Number(data.reposts)) ? Number(data.reposts) : 0;
+    const url = data.url ? String(data.url) : '';
+
+    return `
+      <div class="platform-row" data-row="${rowId}">
+        <div class="row">
+          <div>
+            <label>Platform</label>
+            <select class="p-platform">
+              ${PLATFORMS.map(p => `<option value="${p}" ${p===platform?'selected':''}>${p}</option>`).join('')}
+            </select>
+          </div>
+          <div>
+            <label>Views</label>
+            <input class="p-views" type="number" min="0" step="1" value="${views}" />
+          </div>
+          <div>
+            <label>Likes</label>
+            <input class="p-likes" type="number" min="0" step="1" value="${likes}" />
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label>Comments</label>
+            <input class="p-comments" type="number" min="0" step="1" value="${comments}" />
+          </div>
+          <div>
+            <label>Reposts</label>
+            <input class="p-reposts" type="number" min="0" step="1" value="${reposts}" />
+          </div>
+          <div style="display:flex; align-items:flex-end; justify-content:flex-end;">
+            <button class="btn btn-danger" type="button" data-remove="${rowId}">Remove</button>
+          </div>
+        </div>
+
+        <div class="row one">
+          <div>
+            <label>Post URL</label>
+            <input class="p-url" type="url" placeholder="https://..." value="${escapeHtml(url)}" />
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function addPlatformRow(data) {
+    el.platformRows.insertAdjacentHTML('beforeend', platformRowTemplate(data));
+    bindPlatformRemoveButtons();
+  }
+
+  function bindPlatformRemoveButtons() {
+    el.platformRows.querySelectorAll('[data-remove]').forEach(btn => {
+      if (btn.dataset.bound === '1') return;
+      btn.dataset.bound = '1';
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.remove;
+        const row = el.platformRows.querySelector(`[data-row="${id}"]`);
+        if (row) row.remove();
+        if (el.platformRows.children.length === 0) addPlatformRow();
+      });
+    });
+  }
+
+  function readPlatformsFromForm() {
+    const rows = Array.from(el.platformRows.querySelectorAll('.platform-row'));
+    const platforms = rows.map(r => ({
+      platform: r.querySelector('.p-platform')?.value || 'Instagram',
+      views: clampNonNeg(r.querySelector('.p-views')?.value),
+      likes: clampNonNeg(r.querySelector('.p-likes')?.value),
+      comments: clampNonNeg(r.querySelector('.p-comments')?.value),
+      reposts: clampNonNeg(r.querySelector('.p-reposts')?.value),
+      url: normalizeUrl(r.querySelector('.p-url')?.value),
+    }));
+    return platforms.length ? platforms : [{ platform: 'Instagram', url:'', views: 0, likes: 0, comments: 0, reposts: 0 }];
+  }
+
+  // -----------------------------
+  // Form logic
+  // -----------------------------
+  function toggleUtmUI() {
+    const enabled = el.hasUtm.checked;
+    el.conversionsRow.style.display = enabled ? 'block' : 'none';
+    if (!enabled) el.conversions.value = '0';
+  }
+
+  function resetForm() {
+    state.editingId = null;
+    el.form.reset();
+    el.videoId.value = '';
+    el.conversionsRow.style.display = 'none';
+    el.saveBtn.textContent = 'Save';
+    el.cancelEditBtn.style.display = 'none';
+    el.platformRows.innerHTML = '';
+    addPlatformRow({ platform: 'Instagram' });
+  }
+
+  function startEdit(id) {
+    const v = state.videos.find(x => x.id === id);
+    if (!v) return;
+    const vv = ensurePlatforms(v);
+
+    state.editingId = id;
+    el.videoId.value = vv.id;
+    el.title.value = vv.title || '';
+    el.videoUrl.value = vv.url || '';
+    el.channel.value = vv.channel || '';
+    el.date.value = vv.date || '';
+
+    el.hasUtm.checked = !!vv.hasUtm;
+    el.conversions.value = vv.conversions ?? 0;
+    toggleUtmUI();
+
+    el.platformRows.innerHTML = '';
+    (vv.platforms || []).forEach(p => addPlatformRow(p));
+    if (!el.platformRows.children.length) addPlatformRow({ platform: 'Instagram' });
+
+    el.saveBtn.textContent = 'Update';
+    el.cancelEditBtn.style.display = 'inline-block';
+    showPage('form');
+  }
+
+  function deleteVideo(id) {
+    const v = state.videos.find(x => x.id === id);
+    if (!v) return;
+
+    const ok = confirm(`¿Borrar el video "${ensurePlatforms(v).title}"?`);
+    if (!ok) return;
+
+    state.videos = state.videos.filter(x => x.id !== id);
+    if (state.editingId === id) resetForm();
+    persist();
+    render();
+  }
+
+  function upsertFromForm(e) {
+    e.preventDefault();
+
+    const payload = {
+      id: el.videoId.value || uid(),
+      title: (el.title.value || '').trim(),
+      url: normalizeUrl(el.videoUrl.value),
+      channel: (el.channel.value || '').trim(),
+      date: el.date.value,
+
+      hasUtm: !!el.hasUtm.checked,
+      conversions: el.hasUtm.checked ? clampNonNeg(el.conversions.value) : 0,
+
+      platforms: readPlatformsFromForm()
+    };
+
+    if (!payload.title) return alert('El título es obligatorio.');
+    if (!payload.date) return alert('La fecha es obligatoria.');
+
+    const idx = state.videos.findIndex(v => v.id === payload.id);
+    if (idx >= 0) state.videos[idx] = payload;
+    else state.videos.push(payload);
+
+    persist();
+    resetForm();
+    showPage('dashboard');
+    render();
+  }
+
+  // -----------------------------
+  // Rendering
+  // -----------------------------
+  function renderTotals() {
+    const videos = getFilteredVideos();
+    el.totals.videos.textContent = nf.format(videos.length);
+
+    const totals = videos.reduce((acc, v) => {
+      const a = aggregateVideoForPlatform(v, 'all');
+      acc.views += a.views;
+      acc.likes += a.likes;
+      acc.comments += a.comments;
+      acc.reposts += a.reposts;
+      acc.conversions += a.conversions;
+      return acc;
+    }, { views:0, likes:0, comments:0, reposts:0, conversions:0 });
+
+    el.totals.views.textContent = nf.format(totals.views);
+    el.totals.likes.textContent = nf.format(totals.likes);
+    el.totals.comments.textContent = nf.format(totals.comments);
+    el.totals.reposts.textContent = nf.format(totals.reposts);
+    el.totals.conversions.textContent = nf.format(totals.conversions);
+  }
+
+  function renderTable() {
+    const videos = getFilteredVideos();
+
+    if (videos.length === 0) {
+      el.table.innerHTML = `<tr><td class="empty" colspan="11">No hay videos en el rango seleccionado. Prueba “Clear (All dates)”.</td></tr>`;
+      return;
+    }
+
+    el.table.innerHTML = videos
+      .slice()
+      .sort((a, b) => (ensurePlatforms(b).date || '').localeCompare(ensurePlatforms(a).date || ''))
+      .map(raw => {
+        const v = ensurePlatforms(raw);
+        const a = aggregateVideoForPlatform(v, 'all');
+
+        const titleHtml = v.url
+          ? `<a class="video-link" href="${escapeHtml(v.url)}" target="_blank" rel="noopener">${escapeHtml(v.title)}</a>`
+          : `<strong>${escapeHtml(v.title)}</strong>`;
+
+        const platformsHtml = (v.platforms || []).length
+          ? `<div class="platform-list">${
+              v.platforms.map(p => {
+                const postUrl = normalizeUrl(p.url);
+                const pill = postUrl
+                  ? `<a class="platform-pill clickable" href="${escapeHtml(postUrl)}" target="_blank" rel="noopener">${escapeHtml(p.platform || '—')}</a>`
+                  : `<span class="platform-pill">${escapeHtml(p.platform || '—')}</span>`;
+
+                return `
+                  <div class="platform-item">
+                    ${pill}
+                    <div class="platform-metrics">
+                      V:${nf.format(Number(p.views)||0)} · L:${nf.format(Number(p.likes)||0)} · C:${nf.format(Number(p.comments)||0)} · R:${nf.format(Number(p.reposts)||0)}
+                    </div>
+                  </div>
+                `;
+              }).join('')
+            }</div>`
+          : `<span class="muted">—</span>`;
+
+        return `
+          <tr>
+            <td class="wrap">${titleHtml}</td>
+            <td class="wrap">${escapeHtml(v.channel || '—')}</td>
+            <td>${formatDateISO(v.date)}</td>
+            <td class="wrap">${platformsHtml}</td>
+            <td>${nf.format(a.views)}</td>
+            <td>${nf.format(a.likes)}</td>
+            <td>${nf.format(a.comments)}</td>
+            <td>${nf.format(a.reposts)}</td>
+            <td>${v.hasUtm ? 'UTM' : '—'}</td>
+            <td>${nf.format(a.conversions)}</td>
+            <td>
+              <div class="actions">
+                <button class="btn" type="button" data-edit="${v.id}">Edit</button>
+                <button class="btn btn-danger" type="button" data-del="${v.id}">Delete</button>
+              </div>
+            </td>
+          </tr>
+        `;
+      })
+      .join('');
+  }
+
+  function renderRanking() {
+    const videos = getFilteredVideos();
+    if (videos.length === 0) {
+      el.rankingList.innerHTML = `<div class="empty">No hay datos en el rango de fechas seleccionado.</div>`;
+      return;
+    }
+
+    const max = maximaAgg(videos, state.platformFilter);
+
+    const scored = videos.map(raw => {
+      const v = ensurePlatforms(raw);
+      const agg = aggregateVideoForPlatform(v, state.platformFilter);
+      const score = computeScoreAgg(agg, max);
+      return { v, agg, score };
+    });
+
+    let ordered;
+    if (state.rankSort === 'score') {
+      ordered = scored.slice().sort((a, b) => b.score - a.score);
+    } else {
+      const k = state.rankSort;
+      ordered = scored.slice().sort((a, b) => (b.agg[k] || 0) - (a.agg[k] || 0));
+    }
+
+    const bestScore = ordered[0]?.score || 1;
+
+    el.rankingList.innerHTML = ordered.slice(0, 5).map((r, i) => {
+      const v = r.v;
+      const agg = r.agg;
+
+      const parts = METRICS.map(m => {
+        const normalized = norm(agg[m] || 0, max[m]);
+        return { m, normalized, raw: agg[m] || 0 };
+      });
+
+      const scorePct = bestScore ? (r.score / bestScore) * 100 : 0;
+
+      return `
+        <div class="rank-item">
+          <div class="rank-num">${i + 1}</div>
+          <div>
+            <div class="rank-title">
+              <strong>${escapeHtml(v.title)}</strong>
+              <span class="rank-sub">${escapeHtml(v.channel || '—')} · ${formatDateISO(v.date)} · ${state.platformFilter === 'all' ? 'All platforms' : escapeHtml(state.platformFilter)}</span>
+            </div>
+
+            <div class="rank-bar"><div style="width:${scorePct.toFixed(1)}%"></div></div>
+
+            <div class="rank-breakdown">
+              ${parts.map(p => `
+                <div class="chip" title="Normalizado: ${(p.normalized*100).toFixed(0)}% · Peso: ${(SCORE_WEIGHTS[p.m]*100).toFixed(0)}%">
+                  <div class="label">${METRIC_LABEL[p.m]}</div>
+                  <div class="value">${nf.format(p.raw)}</div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+          <div style="text-align:right;">
+            <div style="font-weight:900;">${(r.score * 100).toFixed(1)}</div>
+            <div class="muted" style="font-size:11px; font-weight:800;">score</div>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  function renderCharts() {
+    const videos = getFilteredVideos();
+    const metric = state.metric;
+    const label = METRIC_LABEL[metric] || 'Metric';
+    const pfLabel = state.platformFilter === 'all' ? 'All platforms' : state.platformFilter;
+
+    el.metricByVideoTitle.textContent = `${label} by Video · ${pfLabel}`;
+    el.metricOverTimeTitle.textContent = `${label} over Time · ${pfLabel}`;
+
+    // Chart 1: Metric by video (FIX: horizontal + truncado)
+    const videoLabelsFull = videos.map(v => ensurePlatforms(v).title || '—');
+    const videoLabels = videoLabelsFull.map(t => truncateLabel(t, 24));
+    const videoData = videos.map(v => {
+      const a = aggregateVideoForPlatform(v, state.platformFilter);
+      return a[metric] || 0;
+    });
+
+    if (chartMetric) chartMetric.destroy();
+    chartMetric = new Chart(document.getElementById('metricChart'), {
+      type: 'bar',
+      data: {
+        labels: videoLabels.length ? videoLabels : ['—'],
+        datasets: [{
+          data: videoLabels.length ? videoData : [0],
+          backgroundColor: '#ff355e',
+          borderRadius: 8
+        }]
+      },
+      options: {
+        indexAxis: 'y',
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              title: (items) => {
+                const idx = items?.[0]?.dataIndex ?? 0;
+                return videoLabelsFull[idx] || '—';
+              },
+              label: (ctx) => `${label}: ${nf.format(ctx.parsed.x)}`
+            }
+          }
+        },
+        scales: {
+          y: { ticks: { autoSkip: false } },
+          x: { ticks: { precision: 0 } }
+        }
+      }
+    });
+
+    // Chart 2: Metric over time (filtered by platform, aggregated by date)
+    const byDate = new Map();
+    for (const v of videos) {
+      const d = ensurePlatforms(v).date || '—';
+      const a = aggregateVideoForPlatform(v, state.platformFilter);
+      byDate.set(d, (byDate.get(d) || 0) + (Number(a[metric]) || 0));
+    }
+
+    const dates = Array.from(byDate.keys()).filter(d => d !== '—').sort((a, b) => a.localeCompare(b));
+    const timeLabels = dates.length ? dates.map(formatDateISO) : ['—'];
+    const timeData = dates.length ? dates.map(d => byDate.get(d) || 0) : [0];
+
+    if (chartTime) chartTime.destroy();
+    chartTime = new Chart(document.getElementById('metricTimeChart'), {
+      type: 'line',
+      data: {
+        labels: timeLabels,
+        datasets: [{
+          data: timeData,
+          borderColor: '#ff355e',
+          backgroundColor: 'rgba(255,53,94,0.2)',
+          fill: true,
+          tension: 0.3,
+          pointRadius: 3
+        }]
+      },
+      options: {
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: (ctx) => `${label}: ${nf.format(ctx.parsed.y)}` } }
+        }
+      }
+    });
+  }
+
+  function render() {
+    renderTotals();
+    renderRanking();
+    renderTable();
+    renderCharts();
+  }
+
+  // -----------------------------
+  // Event bindings
+  // -----------------------------
+  el.navButtons.forEach(btn => btn.addEventListener('click', () => showPage(btn.dataset.page)));
+
+  el.metricSelect.addEventListener('change', () => {
+    state.metric = el.metricSelect.value;
+    render();
+  });
+
+  el.platformFilter.addEventListener('change', () => setPlatformFilter(el.platformFilter.value));
+  el.rankPlatformFilter.addEventListener('change', () => setPlatformFilter(el.rankPlatformFilter.value));
+
+  el.rankSort.addEventListener('change', () => {
+    state.rankSort = el.rankSort.value;
+    renderRanking();
+  });
+
+  el.hasUtm.addEventListener('change', toggleUtmUI);
+  el.addPlatformBtn.addEventListener('click', () => addPlatformRow({ platform: 'Instagram' }));
+  el.form.addEventListener('submit', upsertFromForm);
+
+  el.cancelEditBtn.addEventListener('click', () => {
+    resetForm();
+    showPage('dashboard');
+  });
+
+  el.table.addEventListener('click', (e) => {
+    const editBtn = e.target.closest('[data-edit]');
+    if (editBtn) startEdit(editBtn.dataset.edit);
+
+    const delBtn = e.target.closest('[data-del]');
+    if (delBtn) deleteVideo(delBtn.dataset.del);
+  });
+
+  // NUEVO: date filter bindings
+  el.dateFrom.addEventListener('change', () => setDateFilters(el.dateFrom.value, el.dateTo.value));
+  el.dateTo.addEventListener('change', () => setDateFilters(el.dateFrom.value, el.dateTo.value));
+  el.clearDatesBtn.addEventListener('click', () => setDateFilters('', ''));
+
+  // -----------------------------
+  // Dev API
+  // -----------------------------
+  window.VideoAnalytics = {
+    getVideos: () => state.videos.slice(),
+    getFilteredVideos: () => getFilteredVideos().slice(),
+  };
+
+  // -----------------------------
+  // Init
+  // -----------------------------
+  load();
+  state.metric = el.metricSelect.value;
+  state.rankSort = el.rankSort.value;
+
+  // init date filters
+  el.dateFrom.value = '';
+  el.dateTo.value = '';
+
+  function populatePlatformFilters() {
+    const options = [
+      { value: 'all', label: 'All platforms' },
+      ...PLATFORMS.map(p => ({ value: p, label: p }))
+    ];
+    const html = options.map(o => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`).join('');
+    el.platformFilter.innerHTML = html;
+    el.rankPlatformFilter.innerHTML = html;
+    el.platformFilter.value = state.platformFilter;
+    el.rankPlatformFilter.value = state.platformFilter;
+  }
+
+  populatePlatformFilters();
+  setPlatformFilter('all');
+
+  resetForm();
+  render();
+</script>
+</body>
+</html>
